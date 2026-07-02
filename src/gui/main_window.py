@@ -310,6 +310,7 @@ class MainWindow(QMainWindow):
 
         # DataForge extraction worker
         self._forge_worker: Optional[DataForgeExtractWorker] = None
+        self._forge_progress_dialog: Optional[AnimatedProgressDialog] = None
 
         # #180: when True, the Simple-mode one-button flow is running and the
         # enhancements-generation-finished slot should continue into
@@ -1467,6 +1468,42 @@ class MainWindow(QMainWindow):
         # disabling the one button gates all of them during operations.
         self.more_btn.setEnabled(enabled)
 
+    def _has_active_file_operation(self) -> bool:
+        """True while a background load/extract/generate operation owns files."""
+        workers = (
+            self._loader_worker,
+            self._p4k_worker,
+            self._enhancements_worker,
+            self._forge_worker,
+            self._startup_sync_worker,
+        )
+        dialogs = (
+            self._loading_progress,
+            self._p4k_progress,
+            self._enhancements_progress_dialog,
+            self._forge_progress_dialog,
+        )
+        return any(worker is not None for worker in workers) or any(
+            dialog is not None for dialog in dialogs
+        )
+
+    def _refresh_toolbar_busy_state(self) -> None:
+        """Disable destructive actions while generated/cache files are changing."""
+        self._set_toolbar_enabled(not self._has_active_file_operation())
+
+    def _block_if_file_operation_running(self, action_name: str) -> bool:
+        """Return True after warning that an action must wait for file work."""
+        if not self._has_active_file_operation():
+            return False
+        logger.info(f"{action_name} blocked while background file operation is running")
+        QMessageBox.information(
+            self,
+            "Operation in Progress",
+            "Smart Citizen is still extracting, generating, or loading files.\n\n"
+            f"Wait for that operation to finish before using {action_name}.",
+        )
+        return True
+
     @timed
     def load_default_values(self):
         """Load default values from cached base source in AppData."""
@@ -1525,6 +1562,9 @@ class MainWindow(QMainWindow):
     @timed
     def apply_to_game(self):
         """Apply merged sources + user edits to game installation and backup existing file."""
+        if self._block_if_file_operation_running("Apply to Game"):
+            return
+
         if not self.entries:
             QMessageBox.warning(self, tr("dialogs.warning_title"), tr("dialogs.no_file_loaded"))
             return
@@ -4105,6 +4145,7 @@ class MainWindow(QMainWindow):
         self._loader_worker.error.connect(self._on_loading_error)
         self._loader_worker.progress.connect(self._loading_progress.setLabelText)
         self._loader_worker.progress_pct.connect(self._loading_progress.set_progress)
+        self._refresh_toolbar_busy_state()
         self._loader_worker.start()
 
     @pyqtSlot(list, dict, list)
@@ -4166,6 +4207,7 @@ class MainWindow(QMainWindow):
         if self._check_enhancements_after_loading:
             self._check_enhancements_after_loading = False
             self._check_enhancements_freshness()
+        self._refresh_toolbar_busy_state()
 
         # From here on, dirty-marking reflects a real in-session change —
         # see _mark_apply_dirty / _session_has_unapplied_edit.
@@ -4174,13 +4216,15 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_loading_error(self, error_msg: str):
         """Handle file loading error."""
-        self._loading_progress.close()
-        self._loading_progress = None
+        if self._loading_progress is not None:
+            self._loading_progress.close()
+            self._loading_progress = None
         QMessageBox.critical(self, "Error", f"Failed to load sources: {error_msg}")
         if self._loader_worker:
             self._loader_worker.quit()
             self._loader_worker.wait()
             self._loader_worker = None
+        self._refresh_toolbar_busy_state()
 
     def _run_simple_apply(self):
         """Simple-mode one-button flow (#180): generate enhancements, then apply.
@@ -4316,6 +4360,7 @@ class MainWindow(QMainWindow):
         self._enhancements_worker.progress_pct.connect(self._enhancements_progress_dialog.set_progress)
         self._enhancements_worker.error.connect(self._on_enhancements_generation_error)
         self._enhancements_worker.finished.connect(self._on_enhancements_generation_finished)
+        self._refresh_toolbar_busy_state()
         self._enhancements_worker.start()
 
     def _end_simple_run(self):
@@ -4361,6 +4406,7 @@ class MainWindow(QMainWindow):
         else:
             self._end_simple_run()
             self.statusBar().showMessage("Enhancement generation failed — check the Log tab for details")
+        self._refresh_toolbar_busy_state()
 
     def _run_dataforge_extraction(self):
         """Launch DataForgeExtractWorker in the background (non-blocking)."""
@@ -4387,6 +4433,7 @@ class MainWindow(QMainWindow):
         self._forge_worker.progress_pct.connect(self._forge_progress_dialog.set_progress)
         self._forge_worker.error.connect(self._on_dataforge_extract_error)
         self._forge_worker.finished.connect(self._on_dataforge_extract_finished)
+        self._refresh_toolbar_busy_state()
         self._forge_worker.start()
 
     def _on_dataforge_extract_error(self, message: str):
@@ -4430,6 +4477,7 @@ class MainWindow(QMainWindow):
                 self._forge_progress_dialog = None
             self.enhancements_tab.set_operation_idle(success=False)
             self.statusBar().showMessage("DataForge extraction failed — check the Log tab for details")
+        self._refresh_toolbar_busy_state()
 
     def _run_p4k_extraction(self):
         """Launch P4kExtractWorker with a progress dialog; reload sources on success."""
@@ -4448,11 +4496,14 @@ class MainWindow(QMainWindow):
         self._p4k_worker.progress_pct.connect(self._p4k_progress.set_progress)
         self._p4k_worker.error.connect(lambda err: QMessageBox.warning(self, "Extraction Error", err))
         self._p4k_worker.finished.connect(self._on_p4k_extract_finished)
+        self._refresh_toolbar_busy_state()
         self._p4k_worker.start()
 
     def _on_p4k_extract_finished(self, success: bool):
         """Handle P4K extraction completion."""
-        self._p4k_progress.close()
+        if self._p4k_progress is not None:
+            self._p4k_progress.close()
+            self._p4k_progress = None
         self._p4k_worker.quit()
         self._p4k_worker.wait()
         self._p4k_worker = None
@@ -4478,6 +4529,7 @@ class MainWindow(QMainWindow):
 
             # Show progress dialog while reloading with extracted data
             self._show_loading_progress("Reloading with extracted base.ini...")
+        self._refresh_toolbar_busy_state()
 
     def closeEvent(self, event):
         """Save state and overrides before closing."""

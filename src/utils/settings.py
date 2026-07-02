@@ -2259,9 +2259,10 @@ class AppSettings:
     def get_channel_data_dir() -> Path:
         r"""Return ``{user_data_dir}\{active_channel}\`` (created if needed).
 
-        All per-channel user data (cache, backups, user.ini, DataForge
-        extraction) lives under this. :meth:`get_user_data_dir` stays the
-        root holding every channel's subfolder.
+        All per-channel user data lives under this. By default the large,
+        disposable DataForge XML cache is kept in AppData\Local instead, but
+        an explicit user-data override or portable build keeps it under this
+        same tree.
         """
         channel_dir = AppSettings.get_user_data_dir() / AppSettings.get_active_channel()
         channel_dir.mkdir(parents=True, exist_ok=True)
@@ -2422,54 +2423,77 @@ class AppSettings:
         return logs_dir
 
     @staticmethod
+    def _get_local_dataforge_cache_dir() -> Path:
+        r"""Return the default DataForge cache path under AppData\Local."""
+        local_appdata = Path(
+            os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        )
+        return (
+            local_appdata
+            / "Smart Citizen"
+            / AppSettings.get_active_channel()
+            / "cache"
+            / "dataforge"
+        )
+
+    @staticmethod
     def migrate_dataforge_cache_to_local() -> None:
-        r"""One-shot move of the DataForge XML cache from Documents → AppData\Local.
+        r"""Move the DataForge XML cache to the active configured location.
 
-        Pre-1.0 the DataForge cache lived inside get_cache_dir() (Documents\…),
-        putting ~1.4 GB of extracted XMLs into the OneDrive sync tree. Moving it
-        to AppData\Local eliminates per-file OneDrive / Defender / Indexer hooks
-        during extraction and keeps large build-artefact files out of cloud sync.
+        Default installs keep the ~1.4 GB DataForge cache in AppData\Local to
+        avoid OneDrive sync / Defender / Indexer churn in Documents. Users can
+        override the cache base independently from the app-data folder.
 
-        Idempotent: no-ops when the old path is already absent. If the new
-        location already has a valid stamp the old directory is cleaned up and
+        Idempotent: no-ops when the source path is already absent. If the
+        target already has a valid stamp the source directory is cleaned up and
         the migration is considered complete.
         """
         import shutil
 
-        old_dir = AppSettings.get_cache_dir() / "dataforge"
-        local_appdata = Path(
-            os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-        )
-        new_dir = (
-            local_appdata / "Smart Citizen"
-            / AppSettings.get_active_channel()
-            / "cache" / "dataforge"
-        )
-
-        if not old_dir.exists():
-            return
-
         from src.utils.pak_extractor import P4K_MTIME_STAMP
-        if (new_dir / P4K_MTIME_STAMP).exists():
-            logger.info(
-                f"DataForge cache already at new location; removing old copy at {old_dir}"
-            )
-            try:
-                shutil.rmtree(old_dir, ignore_errors=True)
-            except Exception as e:
-                logger.warning(f"Could not remove old DataForge cache at {old_dir}: {e}")
-            return
 
-        logger.info(f"Migrating DataForge cache: {old_dir} → {new_dir}")
-        try:
-            new_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(old_dir), str(new_dir))
-            logger.info("DataForge cache migration complete")
-        except Exception as e:
-            logger.warning(
-                f"DataForge cache migration failed ({e}); "
-                "cache will be re-extracted on next use"
-            )
+        new_dir = AppSettings.get_dataforge_cache_dir()
+        legacy_candidates = (
+            AppSettings.get_cache_dir() / "dataforge",
+            AppSettings._get_local_dataforge_cache_dir(),
+        )
+
+        for old_dir in legacy_candidates:
+            if old_dir.resolve() == new_dir.resolve() or not old_dir.exists():
+                continue
+
+            if (new_dir / P4K_MTIME_STAMP).exists():
+                logger.info(
+                    f"DataForge cache already at selected location; removing old copy at {old_dir}"
+                )
+                try:
+                    shutil.rmtree(old_dir)
+                except OSError as e:
+                    logger.warning(
+                        f"Could not remove old DataForge cache at {old_dir}: {e}"
+                    )
+                continue
+
+            if new_dir.exists():
+                try:
+                    new_dir.rmdir()
+                except OSError:
+                    logger.warning(
+                        f"DataForge cache exists at selected location without a valid "
+                        f"stamp; leaving old copy at {old_dir}"
+                    )
+                    continue
+
+            logger.info(f"Migrating DataForge cache: {old_dir} → {new_dir}")
+            try:
+                new_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(old_dir), str(new_dir))
+                logger.info("DataForge cache migration complete")
+            except (OSError, shutil.Error) as e:
+                logger.warning(
+                    f"DataForge cache migration failed ({e}); "
+                    "cache will be re-extracted on next use"
+                )
 
     @staticmethod
     def migrate_data_to_documents() -> None:
@@ -2554,7 +2578,9 @@ class AppSettings:
           1. ``CACHE_DIR`` registry override — set by users splitting the
              DataForge cache off the user-data dir (e.g. fast SSD for the
              cache, OneDrive Documents for user.ini).
-          2. ``%LOCALAPPDATA%\\Smart Citizen\\`` — the pre-1.4.1 default,
+          2. Explicit ``USER_DATA_DIR`` override — users who moved all app
+             data off OneDrive keep the cache with that configured root.
+          3. ``%LOCALAPPDATA%\\Smart Citizen\\`` — the pre-1.4.1 default,
              preserved so unchanged installs see no path movement.
 
         Portable mode:
@@ -2569,6 +2595,9 @@ class AppSettings:
             return Path(os.path.expandvars(override)).expanduser().resolve()
         if build_mode.IS_PORTABLE:
             return AppSettings._portable_data_dir() / "cache"
+        user_data_override = AppSettings._get_user_data_dir_override()
+        if user_data_override:
+            return Path(os.path.expandvars(user_data_override)).expanduser().resolve()
         return Path(
             os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
         ) / "Smart Citizen"

@@ -80,7 +80,7 @@ See **[docs/CONTRIBUTOR_GUIDE.md](docs/CONTRIBUTOR_GUIDE.md)** for local setup (
 ## Usage
 
 ### First Run
-1. The app creates `<data folder>\<channel>\` for user data — cache, backups, `user.ini`. The default data folder is `Documents\Smart Citizen`, and it can be changed in the Config tab.
+1. The app creates `<data folder>\<channel>\` for user data — source cache, backups, `user.ini`, and enhancements. The default data folder is `Documents\Smart Citizen`; a custom data folder also holds the DataForge cache, while the default DataForge cache uses LocalAppData.
 2. Open the Config tab and click **Extract from Data.p4k** to unpack stock localization plus DataForge entity data from your installed game. When extraction finishes, sources merge by hierarchy and the strings load into the table automatically.
 3. The guided tutorial auto-runs the first time you launch a new version, walking you through the rest.
 
@@ -105,7 +105,7 @@ The Config tab lets you set:
 - **Star Citizen install path** (the SC root folder containing `LIVE/`, `PTU/`, etc. — auto-detected at install time)
 - **Active channel** (LIVE / PTU / EPTU / HOTFIX / TECH-PREVIEW)
 - **Language** (English, French, Spanish, Brazilian Portuguese; switches the app UI and the game strings)
-- **Smart Citizen data folder** (where `user.ini`, cache, DataForge extraction, enhancement INIs, and backups live)
+- **Smart Citizen data folder** (where `user.ini`, source caches, generated enhancement INIs, and backups live; the DataForge cache has its own configurable path)
 - **Theme**
 - **Data sources**: enable/disable, drag-drop merge priority
 - **Import INI**: fold an external `.ini` into your overrides
@@ -115,10 +115,11 @@ The Enhancements tab lets you toggle each enhancement category (ship stats, weap
 
 ### Data Storage
 
-All per-user data lives under `<data folder>\<channel>\`, where `<data folder>` defaults to `Documents\Smart Citizen` and `<channel>` is one of `LIVE`, `PTU`, `EPTU`, `HOTFIX`, `TECH-PREVIEW`:
+Per-user data lives under `<data folder>\<channel>\`, where `<data folder>` defaults to `Documents\Smart Citizen` and `<channel>` is one of `LIVE`, `PTU`, `EPTU`, `HOTFIX`, `TECH-PREVIEW`:
 
 - **Your edits**: `user.ini`
-- **Cached sources & extracted DataForge**: `cache\` (`base.ini`, `cache\dataforge\`, and the generated `*_enhancements.ini` files)
+- **Cached sources & enhancements**: `cache\` (`base.ini` and the generated `*_enhancements.ini` files)
+- **Extracted DataForge XML cache**: `%LOCALAPPDATA%\Smart Citizen\<channel>\cache\dataforge\` by default; `<data folder>\<channel>\cache\dataforge\` when a custom data folder is configured
 - **Backups**: `backups\` (max 5, oldest auto-deleted)
 
 Each channel is fully isolated — you can run a different customization set on PTU than on LIVE without one bleeding into the other.

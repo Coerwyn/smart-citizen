@@ -138,13 +138,11 @@ class TestChannelScopedPaths:
         ini_path = AppSettings.get_user_ini_path()
         assert ini_path == fake_user_data_dir / "LIVE" / "user.ini"
 
-    def test_dataforge_cache_dir_nests_under_active_channel(
+    def test_dataforge_cache_dir_defaults_to_localappdata(
         self, isolated_qsettings, tmp_path, monkeypatch
     ):
-        # PR #26 moved the DataForge cache out of user_data_dir (Documents)
-        # to LOCALAPPDATA so OneDrive sync / Defender don't churn on the
-        # 1.4 GB extract. The test mirrors that — path must be under
-        # %LOCALAPPDATA%\Smart Citizen\<channel>\cache\dataforge.
+        # Default installs keep the 1.4 GB DataForge extract under
+        # LOCALAPPDATA so OneDrive sync / Defender don't churn on Documents.
         fake_local = tmp_path / "LocalAppData"
         fake_local.mkdir()
         monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
@@ -196,6 +194,20 @@ class TestUserDataDirOverride:
         assert AppSettings.get_cache_dir() == custom_dir / "PTU" / "cache"
         assert AppSettings.get_user_ini_path() == custom_dir / "PTU" / "user.ini"
 
+    def test_dataforge_cache_dir_respects_user_data_dir_override(
+        self, isolated_qsettings, tmp_path, monkeypatch
+    ):
+        custom_dir = tmp_path / "Custom Data"
+        fake_local = tmp_path / "LocalAppData"
+        monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+        AppSettings.set_user_data_dir(custom_dir)
+        AppSettings.set_active_channel("HOTFIX")
+
+        assert (
+            AppSettings.get_dataforge_cache_dir()
+            == custom_dir / "HOTFIX" / "cache" / "dataforge"
+        )
+
     def test_clearing_user_data_dir_reverts_to_documents_default(
         self, isolated_qsettings, tmp_path, monkeypatch
     ):
@@ -208,6 +220,48 @@ class TestUserDataDirOverride:
         AppSettings.set_user_data_dir(None)
 
         assert AppSettings.get_user_data_dir() == docs_dir / "Smart Citizen"
+
+
+class TestDataForgeCacheMigration:
+    def test_default_install_moves_dataforge_cache_to_localappdata(
+        self, isolated_qsettings, tmp_path, monkeypatch
+    ):
+        docs_dir = tmp_path / "Documents"
+        fake_local = tmp_path / "LocalAppData"
+        monkeypatch.setattr(
+            AppSettings, "_resolve_docs_base", staticmethod(lambda: docs_dir)
+        )
+        monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+        AppSettings.set_active_channel("LIVE")
+
+        old_cache = AppSettings.get_cache_dir() / "dataforge"
+        old_cache.mkdir(parents=True)
+        (old_cache / ".p4k_mtime").write_text("123")
+
+        AppSettings.migrate_dataforge_cache_to_local()
+
+        new_cache = fake_local / "Smart Citizen" / "LIVE" / "cache" / "dataforge"
+        assert (new_cache / ".p4k_mtime").read_text() == "123"
+        assert not old_cache.exists()
+
+    def test_custom_data_dir_moves_localappdata_cache_back_to_override(
+        self, isolated_qsettings, tmp_path, monkeypatch
+    ):
+        custom_dir = tmp_path / "Custom Data"
+        fake_local = tmp_path / "LocalAppData"
+        monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+        AppSettings.set_user_data_dir(custom_dir)
+        AppSettings.set_active_channel("PTU")
+
+        old_cache = fake_local / "Smart Citizen" / "PTU" / "cache" / "dataforge"
+        old_cache.mkdir(parents=True)
+        (old_cache / ".p4k_mtime").write_text("456")
+
+        AppSettings.migrate_dataforge_cache_to_local()
+
+        new_cache = custom_dir / "PTU" / "cache" / "dataforge"
+        assert (new_cache / ".p4k_mtime").read_text() == "456"
+        assert not old_cache.exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -151,7 +151,7 @@ Track which crafting blueprints you already own, and see it reflected in-game: o
 
 - **Appearance** — pick the app theme (see below).
 - **Star Citizen Installation** — path to your LIVE directory; auto-detected at install time, editable here. The **Channel** dropdown picks which channel the app reads and writes, and the **Language** dropdown switches the app and game strings (see *Switch Languages* above).
-- **Smart Citizen Data** — folder for `user.ini`, caches, DataForge extraction, generated enhancement INIs, and backups. Defaults to `Documents\Smart Citizen`; move it off OneDrive if extraction or cache cleanup is slow.
+- **Smart Citizen Data** — folder for `user.ini`, source caches, generated enhancement INIs, and backups. Defaults to `Documents\Smart Citizen`; the large DataForge XML cache has its own folder below and defaults to `%LOCALAPPDATA%\Smart Citizen`.
 - **Base Localization (P4K Extraction)** — click **Extract from Data.p4k** to unpack stock localization plus DataForge entity data directly from your installed game. This is the sole source for base strings and enhancement data.
 - **Import INI** — fold an existing INI file into your overrides via the conflict-resolution dialog.
 - **Reset user.ini** — wipe all of your personal edits for the active channel. Prompts for confirmation and auto-backs up the current `user.ini` before clearing it.
