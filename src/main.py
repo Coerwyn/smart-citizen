@@ -39,6 +39,18 @@ from src.utils import i18n
 # any valid level name, e.g. getattr(logging, name, logging.INFO).
 # Setup logging — use --debug flag or LOG_LEVEL env var for perf timing output
 _log_level = logging.DEBUG if ('--debug' in sys.argv or os.environ.get('LOG_LEVEL', '').upper() == 'DEBUG') else logging.INFO
+
+# Windows consoles default to a legacy code page (cp1252) that can't encode
+# some characters used in log messages (e.g. the '→' arrow), which otherwise
+# crashes the StreamHandler with UnicodeEncodeError. Force UTF-8 and never fail
+# on an unmappable glyph. Guarded for the frozen windowed build, where
+# sys.stdout can be None or lack reconfigure().
+if sys.stdout is not None:
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except (AttributeError, ValueError, OSError):
+        pass
+
 logging.basicConfig(
     level=_log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',

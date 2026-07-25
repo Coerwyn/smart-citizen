@@ -263,6 +263,40 @@ class TestDataForgeCacheMigration:
         assert (new_cache / ".p4k_mtime").read_text() == "456"
         assert not old_cache.exists()
 
+    def test_stale_copy_removed_even_with_readonly_file(
+        self, isolated_qsettings, tmp_path, monkeypatch
+    ):
+        # Regression: when the cache is already at the selected location, the
+        # stale legacy copy is cleaned up even if it holds a read-only file
+        # (Windows WinError 5), without raising or warning on every launch.
+        import stat
+
+        custom_dir = tmp_path / "Custom Data"
+        fake_local = tmp_path / "LocalAppData"
+        monkeypatch.setenv("LOCALAPPDATA", str(fake_local))
+        AppSettings.set_user_data_dir(custom_dir)
+        AppSettings.set_active_channel("LIVE")
+
+        # Selected location already holds a valid cache.
+        new_cache = AppSettings.get_dataforge_cache_dir()
+        new_cache.mkdir(parents=True, exist_ok=True)
+        (new_cache / ".p4k_mtime").write_text("stamp")
+
+        # Stale LocalAppData copy with a read-only file inside.
+        stale = fake_local / "Smart Citizen" / "LIVE" / "cache" / "dataforge"
+        (stale / "raw").mkdir(parents=True)
+        locked = stale / "raw" / "record.xml"
+        locked.write_text("x")
+        os.chmod(locked, stat.S_IREAD)
+
+        try:
+            AppSettings.migrate_dataforge_cache_to_local()
+            assert not stale.exists()
+            assert (new_cache / ".p4k_mtime").read_text() == "stamp"
+        finally:
+            if locked.exists():
+                os.chmod(locked, stat.S_IWRITE)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SC install root + channel install path + p4k path

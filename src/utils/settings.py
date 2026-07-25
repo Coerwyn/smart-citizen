@@ -2463,14 +2463,34 @@ class AppSettings:
                 continue
 
             if (new_dir / P4K_MTIME_STAMP).exists():
-                logger.info(
-                    f"DataForge cache already at selected location; removing old copy at {old_dir}"
-                )
+                import stat
+
+                def _clear_readonly(func, target, _exc):
+                    # Read-only attribute is the common WinError 5 cause; clear
+                    # it and retry. A genuinely locked file (Defender / Search
+                    # Indexer / OneDrive holding a handle) is left for a later
+                    # launch rather than raising.
+                    try:
+                        os.chmod(target, stat.S_IWRITE)
+                        func(target)
+                    except OSError:
+                        pass
+
                 try:
-                    shutil.rmtree(old_dir)
-                except OSError as e:
-                    logger.warning(
-                        f"Could not remove old DataForge cache at {old_dir}: {e}"
+                    # Python 3.12 renamed the rmtree callback onerror -> onexc.
+                    shutil.rmtree(old_dir, onexc=_clear_readonly)
+                except TypeError:
+                    shutil.rmtree(old_dir, onerror=_clear_readonly)
+
+                if old_dir.exists():
+                    logger.debug(
+                        f"Stale DataForge cache at {old_dir} could not be fully "
+                        "removed (locked); will retry on next launch"
+                    )
+                else:
+                    logger.info(
+                        f"Removed stale DataForge cache copy at {old_dir} "
+                        "(cache already at the selected location)"
                     )
                 continue
 
