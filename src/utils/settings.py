@@ -2824,9 +2824,14 @@ class AppSettings:
         ``AppData\Local`` unconditionally used to drag the cache back out of a
         user-chosen folder on the next launch, silently undoing that setting.
 
+        With an override, queue the old tree for cleanup after a successful
+        re-extraction at the configured location instead of copying it before
+        a window exists. Only the no-override Documents-to-LocalAppData path
+        moves the cache, staging cross-volume copies before publishing them.
+
         Idempotent: no-ops when the old path is absent or already the resolved
-        destination. If the destination already has a valid stamp the old
-        directory is cleaned up and the migration is considered complete.
+        destination. Without an override, a stamped destination means the old
+        directory can be cleaned up and the migration is considered complete.
         """
         import shutil
 
@@ -2855,6 +2860,14 @@ class AppSettings:
             # while continuing could rmtree what turns out to be the only copy.
             return
 
+        if AppSettings.get_cache_dir_override():
+            AppSettings.set_pending_cache_cleanup(old_dir)
+            logger.info(
+                f"DataForge cache override active at {new_dir}; queued old cache "
+                f"for cleanup after successful re-extraction: {old_dir}"
+            )
+            return
+
         from src.utils.pak_extractor import P4K_MTIME_STAMP
         if (new_dir / P4K_MTIME_STAMP).exists():
             logger.info(
@@ -2879,8 +2892,8 @@ class AppSettings:
                 )
                 return
 
-        # Once CACHE_DIR points at another drive the move is cross-volume, which
-        # shutil implements as a non-atomic copytree + rmtree. Stage it under a
+        # Documents can be on a different drive from LocalAppData; shutil
+        # implements that move as a non-atomic copytree + rmtree. Stage it under a
         # name the freshness check never accepts so an interrupted copy cannot
         # leave a stamped-but-partial cache at new_dir — the next launch would
         # trust that stamp and delete the intact source for it.
